@@ -213,6 +213,7 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
     }
 
 
+@app.get("/")
 @app.get("/stats")
 def stats():
     # ?hours=24 (optional)
@@ -221,3 +222,6 @@ def stats():
     trades = fetch_all_builder_trades(client)
     data = compute_stats(trades, window_hours=hours)
     return jsonify(data)
+
+
+
