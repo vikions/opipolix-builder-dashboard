@@ -80,9 +80,14 @@ def get_builder_trades_call(client: ClobClient, params: Optional[Dict[str, str]]
 def fetch_all_builder_trades(client: ClobClient, after: Optional[str] = None, before: Optional[str] = None) -> List[Dict[str, Any]]:
     all_trades: List[Dict[str, Any]] = []
     cursor: Optional[str] = None
+    
+    max_iterations = 100  # защита от бесконечного цикла
+    iteration = 0
 
-    while True:
+    while iteration < max_iterations:
+        iteration += 1
         params: Dict[str, str] = {}
+        
         if cursor:
             params["id"] = cursor
         if after:
@@ -92,6 +97,10 @@ def fetch_all_builder_trades(client: ClobClient, after: Optional[str] = None, be
 
         resp = get_builder_trades_call(client, params if params else None)
         trades, next_cursor = normalize_builder_trades_response(resp)
+        
+        if not trades:
+            break
+            
         all_trades.extend(trades)
 
         if not next_cursor:
@@ -120,10 +129,10 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
 
     for t in trades:
         n_all += 1
-        size_usdc = to_decimal(t.get("sizeUsdc"))
+        size_usdc = to_decimal(t.get("sizeUsdc") or t.get("size_usdc") or "0")
         vol_all += size_usdc
 
-        txh = (t.get("transactionHash") or "").strip()
+        txh = (t.get("transactionHash") or t.get("transaction_hash") or "").strip()
         if txh:
             tx_all.add(txh)
 
@@ -131,7 +140,7 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
         if owner:
             users_all.add(owner)
 
-        mt = parse_match_time(t.get("matchTime"))
+        mt = parse_match_time(t.get("matchTime") or t.get("match_time"))
         if not mt:
             continue
 
@@ -161,12 +170,12 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
     tx_win: Set[str] = set()
     users_win: Set[str] = set()
     for t in trades:
-        mt = parse_match_time(t.get("matchTime"))
+        mt = parse_match_time(t.get("matchTime") or t.get("match_time"))
         if not mt or mt < start:
             continue
         n_win += 1
-        vol_win += to_decimal(t.get("sizeUsdc"))
-        txh = (t.get("transactionHash") or "").strip()
+        vol_win += to_decimal(t.get("sizeUsdc") or t.get("size_usdc") or "0")
+        txh = (t.get("transactionHash") or t.get("transaction_hash") or "").strip()
         if txh:
             tx_win.add(txh)
         owner = (t.get("owner") or "").strip().lower()
@@ -176,8 +185,8 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
     def money(x: Decimal) -> str:
         return str(x.quantize(Decimal("0.01")))
 
-    daily_list = sorted(daily.values(), key=lambda x: x["date"])
-    weekly_list = sorted(weekly.values(), key=lambda x: x["week"])
+    daily_list = sorted(daily.values(), key=lambda x: x["date"], reverse=True)
+    weekly_list = sorted(weekly.values(), key=lambda x: x["week"], reverse=True)
 
     for row in daily_list:
         row["unique_users"] = len(row["unique_users"])
@@ -193,6 +202,7 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
         "window_hours": window_hours,
         "window_start_utc": start.isoformat(),
         "window_end_utc": now.isoformat(),
+        "total_trades_fetched": len(trades),
         "all_time": {
             "volume_usdc": money(vol_all),
             "trades": n_all,
@@ -228,10 +238,16 @@ class handler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            self.wfile.write(json.dumps(data).encode())
+            self.wfile.write(json.dumps(data, indent=2).encode())
             
         except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            self.wfile.write(json.dumps({"error": str(e)}).encode())
+            self.wfile.write(json.dumps({
+                "error": str(e),
+                "detail": error_detail
+            }, indent=2).encode())
