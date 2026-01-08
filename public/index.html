@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>OpiPolix Builder Stats</title>
+    <style>
+      body { font-family: ui-sans-serif, system-ui; margin: 24px; max-width: 1100px; }
+      .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+      .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      th, td { border-bottom: 1px solid #eee; padding: 8px; text-align: left; font-size: 14px; }
+      th { font-weight: 600; }
+      .muted { color: #6b7280; font-size: 13px; }
+      .row { display:flex; align-items:center; justify-content:space-between; gap: 12px; }
+      button { padding: 8px 12px; border-radius: 10px; border: 1px solid #ddd; background: #fff; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <div class="row">
+      <h1>OpiPolix Builder Stats</h1>
+      <button onclick="load()">Refresh</button>
+    </div>
+    <div class="muted" id="meta">Loading…</div>
+
+    <h2>All time</h2>
+    <div class="grid" id="all"></div>
+
+    <h2>Last 24h</h2>
+    <div class="grid" id="win"></div>
+
+    <h2>Daily</h2>
+    <div id="daily"></div>
+
+    <h2>Weekly</h2>
+    <div id="weekly"></div>
+
+    <script>
+      const card = (title, value) => `
+        <div class="card">
+          <div class="muted">${title}</div>
+          <div style="font-size:22px;font-weight:700;margin-top:4px;">${value}</div>
+        </div>
+      `;
+
+      const table = (rows, cols) => {
+        const head = cols.map(c => `<th>${c.label}</th>`).join("");
+        const body = rows.map(r => `<tr>${cols.map(c => `<td>${r[c.key]}</td>`).join("")}</tr>`).join("");
+        return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+      };
+
+      async function load() {
+        document.getElementById("meta").textContent = "Loading…";
+        const res = await fetch("/api/stats?hours=24");
+        const data = await res.json();
+
+        document.getElementById("meta").textContent =
+          `Generated: ${data.generated_at_utc} (UTC)`;
+
+        document.getElementById("all").innerHTML = [
+          card("Volume (USDC)", data.all_time.volume_usdc),
+          card("Trades", data.all_time.trades),
+          card("Unique TXs", data.all_time.unique_txs),
+          card("Unique Users (owner)", data.all_time.unique_users),
+        ].join("");
+
+        document.getElementById("win").innerHTML = [
+          card("Volume (USDC)", data.window.volume_usdc),
+          card("Trades", data.window.trades),
+          card("Unique TXs", data.window.unique_txs),
+          card("Unique Users (owner)", data.window.unique_users),
+        ].join("");
+
+        document.getElementById("daily").innerHTML = table(
+          data.daily.slice(-30), // last 30 days
+          [
+            { key: "date", label: "Date (UTC)" },
+            { key: "volume_usdc", label: "Volume USDC" },
+            { key: "trades", label: "Trades" },
+            { key: "unique_users", label: "Unique Users" },
+            { key: "unique_txs", label: "Unique TXs" },
+          ]
+        );
+
+        document.getElementById("weekly").innerHTML = table(
+          data.weekly.slice(-12), // last 12 weeks
+          [
+            { key: "week", label: "ISO Week" },
+            { key: "volume_usdc", label: "Volume USDC" },
+            { key: "trades", label: "Trades" },
+            { key: "unique_users", label: "Unique Users" },
+            { key: "unique_txs", label: "Unique TXs" },
+          ]
+        );
+      }
+
+      load();
+    </script>
+  </body>
+</html>
