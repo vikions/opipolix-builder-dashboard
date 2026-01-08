@@ -1,4 +1,3 @@
 python-dotenv==1.0.1
 py-clob-client
 py-builder-signing-sdk
-flask==3.0.0

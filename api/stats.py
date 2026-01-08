@@ -1,17 +1,16 @@
 import os
+import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Set, Tuple
+from http.server import BaseHTTPRequestHandler
+from urllib.parse import parse_qs, urlparse
 
-from flask import Flask, jsonify, request
 from dotenv import load_dotenv
-
 from py_clob_client.client import ClobClient
 from py_builder_signing_sdk.config import BuilderConfig, BuilderApiKeyCreds
 
 load_dotenv()
-
-app = Flask(__name__)
 
 
 def to_decimal(x: Any) -> Decimal:
@@ -211,17 +210,28 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
     }
 
 
-@app.route("/api/stats")
-def stats():
-    try:
-        hours = int(request.args.get("hours", "24"))
-        client = init_client_builder_only()
-        trades = fetch_all_builder_trades(client)
-        data = compute_stats(trades, window_hours=hours)
-        return jsonify(data)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-# ВАЖНО: это нужно для Vercel
-app = app
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        try:
+            # Parse query parameters
+            parsed_path = urlparse(self.path)
+            query_params = parse_qs(parsed_path.query)
+            hours = int(query_params.get('hours', ['24'])[0])
+            
+            # Get data
+            client = init_client_builder_only()
+            trades = fetch_all_builder_trades(client)
+            data = compute_stats(trades, window_hours=hours)
+            
+            # Send response
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(data).encode())
+            
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode())
