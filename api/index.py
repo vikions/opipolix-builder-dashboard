@@ -213,7 +213,7 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
     }
 
 
-@app.get("/api/stats")
+@app.get("/stats")
 def stats():
     # ?hours=24 (optional)
     hours = int(request.args.get("hours", "24"))
