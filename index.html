@@ -14,6 +14,7 @@
       .muted { color: #6b7280; font-size: 13px; }
       .row { display:flex; align-items:center; justify-content:space-between; gap: 12px; }
       button { padding: 8px 12px; border-radius: 10px; border: 1px solid #ddd; background: #fff; cursor: pointer; }
+      .empty { color: #9ca3af; font-style: italic; padding: 20px; text-align: center; }
     </style>
   </head>
   <body>
@@ -44,57 +45,76 @@
       `;
 
       const table = (rows, cols) => {
+        if (!rows || rows.length === 0) {
+          return '<div class="empty">No data available</div>';
+        }
         const head = cols.map(c => `<th>${c.label}</th>`).join("");
         const body = rows.map(r => `<tr>${cols.map(c => `<td>${r[c.key]}</td>`).join("")}</tr>`).join("");
         return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
       };
 
       async function load() {
-        document.getElementById("meta").textContent = "Loading…";
-        const res = await fetch("/api/stats?hours=24");
-        const data = await res.json();
+        try {
+          document.getElementById("meta").textContent = "Loading…";
+          const res = await fetch("/api/stats?hours=24");
+          
+          if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+          }
+          
+          const data = await res.json();
 
-        document.getElementById("meta").textContent =
-          `Generated: ${data.generated_at_utc} (UTC)`;
+          document.getElementById("meta").textContent =
+            `Generated: ${data.generated_at_utc} (UTC) | Total trades: ${data.total_trades_fetched || 'N/A'}`;
 
-        document.getElementById("all").innerHTML = [
-          card("Volume (USDC)", data.all_time.volume_usdc),
-          card("Trades", data.all_time.trades),
-          card("Unique TXs", data.all_time.unique_txs),
-          card("Unique Users (owner)", data.all_time.unique_users),
-        ].join("");
+          document.getElementById("all").innerHTML = [
+            card("Volume (USDC)", data.all_time.volume_usdc),
+            card("Trades", data.all_time.trades),
+            card("Unique TXs", data.all_time.unique_txs),
+            card("Unique Users (owner)", data.all_time.unique_users),
+          ].join("");
 
-        document.getElementById("win").innerHTML = [
-          card("Volume (USDC)", data.window.volume_usdc),
-          card("Trades", data.window.trades),
-          card("Unique TXs", data.window.unique_txs),
-          card("Unique Users (owner)", data.window.unique_users),
-        ].join("");
+          document.getElementById("win").innerHTML = [
+            card("Volume (USDC)", data.window.volume_usdc),
+            card("Trades", data.window.trades),
+            card("Unique TXs", data.window.unique_txs),
+            card("Unique Users (owner)", data.window.unique_users),
+          ].join("");
 
-        document.getElementById("daily").innerHTML = table(
-          data.daily.slice(-30), // last 30 days
-          [
-            { key: "date", label: "Date (UTC)" },
-            { key: "volume_usdc", label: "Volume USDC" },
-            { key: "trades", label: "Trades" },
-            { key: "unique_users", label: "Unique Users" },
-            { key: "unique_txs", label: "Unique TXs" },
-          ]
-        );
+          // Show ALL daily data if available
+          const dailyData = data.daily || [];
+          document.getElementById("daily").innerHTML = table(
+            dailyData,
+            [
+              { key: "date", label: "Date (UTC)" },
+              { key: "volume_usdc", label: "Volume USDC" },
+              { key: "trades", label: "Trades" },
+              { key: "unique_users", label: "Unique Users" },
+              { key: "unique_txs", label: "Unique TXs" },
+            ]
+          );
 
-        document.getElementById("weekly").innerHTML = table(
-          data.weekly.slice(-12), // last 12 weeks
-          [
-            { key: "week", label: "ISO Week" },
-            { key: "volume_usdc", label: "Volume USDC" },
-            { key: "trades", label: "Trades" },
-            { key: "unique_users", label: "Unique Users" },
-            { key: "unique_txs", label: "Unique TXs" },
-          ]
-        );
+          // Show ALL weekly data if available
+          const weeklyData = data.weekly || [];
+          document.getElementById("weekly").innerHTML = table(
+            weeklyData,
+            [
+              { key: "week", label: "ISO Week" },
+              { key: "volume_usdc", label: "Volume USDC" },
+              { key: "trades", label: "Trades" },
+              { key: "unique_users", label: "Unique Users" },
+              { key: "unique_txs", label: "Unique TXs" },
+            ]
+          );
+        } catch (error) {
+          console.error('Error loading stats:', error);
+          document.getElementById("meta").textContent = `Error: ${error.message}`;
+          document.getElementById("meta").style.color = 'red';
+        }
       }
 
       load();
     </script>
   </body>
 </html>
+```
