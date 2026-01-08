@@ -1,10 +1,9 @@
 import os
-import sys
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from flask import jsonify, request
+from flask import Flask, jsonify, request
 from dotenv import load_dotenv
 
 from py_clob_client.client import ClobClient
@@ -12,10 +11,8 @@ from py_builder_signing_sdk.config import BuilderConfig, BuilderApiKeyCreds
 
 load_dotenv()
 
-# Копируйте сюда все вспомогательные функции из index.py:
-# to_decimal, parse_match_time, init_client_builder_only,
-# normalize_builder_trades_response, get_builder_trades_call,
-# fetch_all_builder_trades, iso_week_key, compute_stats
+app = Flask(__name__)
+
 
 def to_decimal(x: Any) -> Decimal:
     try:
@@ -214,8 +211,8 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
     }
 
 
-# Serverless handler для Vercel
-def handler(request):
+@app.route("/api/stats")
+def stats():
     try:
         hours = int(request.args.get("hours", "24"))
         client = init_client_builder_only()
@@ -224,3 +221,7 @@ def handler(request):
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ВАЖНО: это нужно для Vercel
+app = app
