@@ -5,7 +5,6 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Set, Tuple
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
-from types import SimpleNamespace  # ✅ FIX: dict -> object with attrs
 
 from dotenv import load_dotenv
 from py_clob_client.client import ClobClient
@@ -25,7 +24,7 @@ def parse_match_time(s: Optional[str]) -> Optional[datetime]:
     if not s:
         return None
     try:
-        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
     except Exception:
         return None
 
@@ -63,7 +62,7 @@ def normalize_builder_trades_response(resp: Any) -> Tuple[List[Dict[str, Any]], 
         if trades is None:
             trades = []
         next_cursor = resp.get("next_cursor") or resp.get("nextCursor")
-        return list(trades), next_cursor
+        return trades, next_cursor
 
     trades = getattr(resp, "trades", None) or []
     next_cursor = getattr(resp, "next_cursor", None) or getattr(resp, "nextCursor", None)
@@ -71,38 +70,26 @@ def normalize_builder_trades_response(resp: Any) -> Tuple[List[Dict[str, Any]], 
 
 
 def get_builder_trades_call(client: ClobClient, params: Optional[Dict[str, str]]) -> Any:
-    """
-    ✅ FIX: Some py_clob_client versions expect an object with attributes
-    (params.market, params.after, ...), not a dict.
-    """
     if hasattr(client, "get_builder_trades"):
-        if params:
-            return client.get_builder_trades(SimpleNamespace(**params))
-        return client.get_builder_trades(None)
-
+        return client.get_builder_trades(params if params else None)
     if hasattr(client, "getBuilderTrades"):
-        # оставляем на всякий случай (другие версии SDK)
         return client.getBuilderTrades(params if params else None)
-
     raise RuntimeError("No get_builder_trades/getBuilderTrades on this client")
 
 
-def fetch_all_builder_trades(
-    client: ClobClient,
-    after: Optional[str] = None,
-    before: Optional[str] = None,
-    max_iterations: int = 2000,
-) -> List[Dict[str, Any]]:
+def fetch_all_builder_trades(client: ClobClient, after: Optional[str] = None, before: Optional[str] = None) -> List[Dict[str, Any]]:
     all_trades: List[Dict[str, Any]] = []
     cursor: Optional[str] = None
-
+    
+    max_iterations = 100  # защита от бесконечного цикла
     iteration = 0
+
     while iteration < max_iterations:
         iteration += 1
         params: Dict[str, str] = {}
-
+        
         if cursor:
-            params["id"] = cursor  # per docs: cursor via id
+            params["id"] = cursor
         if after:
             params["after"] = after
         if before:
@@ -110,11 +97,12 @@ def fetch_all_builder_trades(
 
         resp = get_builder_trades_call(client, params if params else None)
         trades, next_cursor = normalize_builder_trades_response(resp)
+        
+        if not trades:
+            break
+            
+        all_trades.extend(trades)
 
-        if trades:
-            all_trades.extend(trades)
-
-        # ✅ don't break just because "trades" empty; rely on next_cursor
         if not next_cursor:
             break
         cursor = next_cursor
@@ -127,57 +115,40 @@ def iso_week_key(dt: datetime) -> str:
     return f"{y}-W{w:02d}"
 
 
-def compute_summary(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
-    vol = Decimal("0")
-    txs: Set[str] = set()
-    users: Set[str] = set()
+def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(hours=window_hours)
 
-    for t in trades:
-        vol += to_decimal(t.get("sizeUsdc") or t.get("size_usdc") or "0")
+    vol_all = Decimal("0")
+    n_all = 0
+    tx_all: Set[str] = set()
+    users_all: Set[str] = set()
 
-        txh = (t.get("transactionHash") or t.get("transaction_hash") or "").strip()
-        if txh:
-            txs.add(txh)
-
-        owner = (t.get("owner") or "").strip().lower()
-        if owner:
-            users.add(owner)
-
-    def money(x: Decimal) -> str:
-        return str(x.quantize(Decimal("0.01")))
-
-    return {
-        "volume_usdc": money(vol),
-        "trades": len(trades),
-        "unique_txs": len(txs),
-        "unique_users": len(users),
-    }
-
-
-def compute_daily_weekly(trades: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     daily: Dict[str, Dict[str, Any]] = {}
     weekly: Dict[str, Dict[str, Any]] = {}
 
     for t in trades:
+        n_all += 1
+        size_usdc = to_decimal(t.get("sizeUsdc") or t.get("size_usdc") or "0")
+        vol_all += size_usdc
+
+        txh = (t.get("transactionHash") or t.get("transaction_hash") or "").strip()
+        if txh:
+            tx_all.add(txh)
+
+        owner = (t.get("owner") or "").strip().lower()
+        if owner:
+            users_all.add(owner)
+
         mt = parse_match_time(t.get("matchTime") or t.get("match_time"))
         if not mt:
-            continue  # daily/weekly строим по matchTime
-
-        size_usdc = to_decimal(t.get("sizeUsdc") or t.get("size_usdc") or "0")
-        txh = (t.get("transactionHash") or t.get("transaction_hash") or "").strip()
-        owner = (t.get("owner") or "").strip().lower()
+            continue
 
         day = mt.date().isoformat()
         wk = iso_week_key(mt)
 
         if day not in daily:
-            daily[day] = {
-                "date": day,
-                "volume_usdc": Decimal("0"),
-                "trades": 0,
-                "unique_users": set(),
-                "unique_txs": set(),
-            }
+            daily[day] = {"date": day, "volume_usdc": Decimal("0"), "trades": 0, "unique_users": set(), "unique_txs": set()}
         daily[day]["volume_usdc"] += size_usdc
         daily[day]["trades"] += 1
         if owner:
@@ -186,13 +157,7 @@ def compute_daily_weekly(trades: List[Dict[str, Any]]) -> Tuple[List[Dict[str, A
             daily[day]["unique_txs"].add(txh)
 
         if wk not in weekly:
-            weekly[wk] = {
-                "week": wk,
-                "volume_usdc": Decimal("0"),
-                "trades": 0,
-                "unique_users": set(),
-                "unique_txs": set(),
-            }
+            weekly[wk] = {"week": wk, "volume_usdc": Decimal("0"), "trades": 0, "unique_users": set(), "unique_txs": set()}
         weekly[wk]["volume_usdc"] += size_usdc
         weekly[wk]["trades"] += 1
         if owner:
@@ -200,91 +165,89 @@ def compute_daily_weekly(trades: List[Dict[str, Any]]) -> Tuple[List[Dict[str, A
         if txh:
             weekly[wk]["unique_txs"].add(txh)
 
+    vol_win = Decimal("0")
+    n_win = 0
+    tx_win: Set[str] = set()
+    users_win: Set[str] = set()
+    for t in trades:
+        mt = parse_match_time(t.get("matchTime") or t.get("match_time"))
+        if not mt or mt < start:
+            continue
+        n_win += 1
+        vol_win += to_decimal(t.get("sizeUsdc") or t.get("size_usdc") or "0")
+        txh = (t.get("transactionHash") or t.get("transaction_hash") or "").strip()
+        if txh:
+            tx_win.add(txh)
+        owner = (t.get("owner") or "").strip().lower()
+        if owner:
+            users_win.add(owner)
+
     def money(x: Decimal) -> str:
         return str(x.quantize(Decimal("0.01")))
 
     daily_list = sorted(daily.values(), key=lambda x: x["date"], reverse=True)
     weekly_list = sorted(weekly.values(), key=lambda x: x["week"], reverse=True)
 
-    for r in daily_list:
-        r["unique_users"] = len(r["unique_users"])
-        r["unique_txs"] = len(r["unique_txs"])
-        r["volume_usdc"] = money(r["volume_usdc"])
+    for row in daily_list:
+        row["unique_users"] = len(row["unique_users"])
+        row["unique_txs"] = len(row["unique_txs"])
+        row["volume_usdc"] = money(row["volume_usdc"])
+    for row in weekly_list:
+        row["unique_users"] = len(row["unique_users"])
+        row["unique_txs"] = len(row["unique_txs"])
+        row["volume_usdc"] = money(row["volume_usdc"])
 
-    for r in weekly_list:
-        r["unique_users"] = len(r["unique_users"])
-        r["unique_txs"] = len(r["unique_txs"])
-        r["volume_usdc"] = money(r["volume_usdc"])
-
-    return daily_list, weekly_list
+    return {
+        "generated_at_utc": now.isoformat(),
+        "window_hours": window_hours,
+        "window_start_utc": start.isoformat(),
+        "window_end_utc": now.isoformat(),
+        "total_trades_fetched": len(trades),
+        "all_time": {
+            "volume_usdc": money(vol_all),
+            "trades": n_all,
+            "unique_txs": len(tx_all),
+            "unique_users": len(users_all),
+        },
+        "window": {
+            "volume_usdc": money(vol_win),
+            "trades": n_win,
+            "unique_txs": len(tx_win),
+            "unique_users": len(users_win),
+        },
+        "daily": daily_list,
+        "weekly": weekly_list,
+    }
 
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
+            # Parse query parameters
             parsed_path = urlparse(self.path)
             query_params = parse_qs(parsed_path.query)
-
-            hours = int(query_params.get("hours", ["24"])[0])
-            now = datetime.now(timezone.utc)
-
-            # ✅ strictly per docs: after/before are strings
-            after_24h = (now - timedelta(hours=hours)).isoformat()
-            after_7d = (now - timedelta(days=7)).isoformat()
-
+            hours = int(query_params.get('hours', ['24'])[0])
+            
+            # Get data
             client = init_client_builder_only()
-
-            # ✅ ALL TIME: leave as-is (no time filters)
-            trades_all = fetch_all_builder_trades(client)
-            all_time = compute_summary(trades_all)
-
-            # ✅ LAST 24H: use after
-            trades_24h = fetch_all_builder_trades(client, after=after_24h)
-            window = compute_summary(trades_24h)
-
-            # ✅ LAST 7D: use after (week stats)
-            trades_7d = fetch_all_builder_trades(client, after=after_7d)
-            week = compute_summary(trades_7d)
-
-            # ✅ breakdowns from last 7d (fast + relevant)
-            daily_list, weekly_list = compute_daily_weekly(trades_7d)
-
-            data = {
-                "generated_at_utc": now.isoformat(),
-                "window_hours": hours,
-                "window_start_utc": (now - timedelta(hours=hours)).isoformat(),
-                "window_end_utc": now.isoformat(),
-
-                "all_time": all_time,
-                "window": window,     # last <hours>
-                "week": week,         # last 7d summary
-
-                "daily": daily_list,
-                "weekly": weekly_list,
-
-                # можно потом убрать:
-                "debug": {
-                    "after_24h": after_24h,
-                    "after_7d": after_7d,
-                    "trades_all_fetched": len(trades_all),
-                    "trades_24h_fetched": len(trades_24h),
-                    "trades_7d_fetched": len(trades_7d),
-                }
-            }
-
+            trades = fetch_all_builder_trades(client)
+            data = compute_stats(trades, window_hours=hours)
+            
+            # Send response
             self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(json.dumps(data, indent=2).encode())
-
+            
         except Exception as e:
             import traceback
+            error_detail = traceback.format_exc()
             self.send_response(500)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(json.dumps({
                 "error": str(e),
-                "detail": traceback.format_exc()
+                "detail": error_detail
             }, indent=2).encode())
