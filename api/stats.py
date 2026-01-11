@@ -24,9 +24,16 @@ def parse_match_time(s: Optional[str]) -> Optional[datetime]:
     if not s:
         return None
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        # Попробуем разные форматы
+        if s.endswith('Z'):
+            return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return datetime.fromisoformat(s)
     except Exception:
-        return None
+        try:
+            # Попробуем timestamp
+            return datetime.fromtimestamp(float(s), tz=timezone.utc)
+        except Exception:
+            return None
 
 
 def init_client_builder_only() -> ClobClient:
@@ -69,7 +76,7 @@ def normalize_builder_trades_response(resp: Any) -> Tuple[List[Dict[str, Any]], 
     return list(trades), next_cursor
 
 
-def get_builder_trades_call(client: ClobClient, params: Optional[Dict[str, str]]) -> Any:
+def get_builder_trades_call(client: ClobClient, params: Optional[Dict[str, Any]]) -> Any:
     if hasattr(client, "get_builder_trades"):
         return client.get_builder_trades(params if params else None)
     if hasattr(client, "getBuilderTrades"):
@@ -77,16 +84,28 @@ def get_builder_trades_call(client: ClobClient, params: Optional[Dict[str, str]]
     raise RuntimeError("No get_builder_trades/getBuilderTrades on this client")
 
 
-def fetch_all_builder_trades(client: ClobClient, after: Optional[str] = None, before: Optional[str] = None) -> List[Dict[str, Any]]:
+def fetch_all_builder_trades(
+    client: ClobClient, 
+    after: Optional[str] = None, 
+    before: Optional[str] = None,
+    max_iterations: int = 100
+) -> List[Dict[str, Any]]:
+    """
+    Fetches all builder trades with optional time filtering.
+    
+    Args:
+        client: ClobClient instance
+        after: ISO timestamp or Unix timestamp (trades after this time)
+        before: ISO timestamp or Unix timestamp (trades before this time)
+        max_iterations: Maximum number of pagination iterations
+    """
     all_trades: List[Dict[str, Any]] = []
     cursor: Optional[str] = None
-    
-    max_iterations = 100  # защита от бесконечного цикла
     iteration = 0
 
     while iteration < max_iterations:
         iteration += 1
-        params: Dict[str, str] = {}
+        params: Dict[str, Any] = {}
         
         if cursor:
             params["id"] = cursor
@@ -127,6 +146,10 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
     daily: Dict[str, Dict[str, Any]] = {}
     weekly: Dict[str, Dict[str, Any]] = {}
 
+    # Для отладки
+    trades_with_time = 0
+    trades_without_time = 0
+
     for t in trades:
         n_all += 1
         size_usdc = to_decimal(t.get("sizeUsdc") or t.get("size_usdc") or "0")
@@ -140,15 +163,24 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
         if owner:
             users_all.add(owner)
 
+        # Парсим время
         mt = parse_match_time(t.get("matchTime") or t.get("match_time"))
         if not mt:
+            trades_without_time += 1
             continue
+        
+        trades_with_time += 1
 
+        # Daily aggregation
         day = mt.date().isoformat()
-        wk = iso_week_key(mt)
-
         if day not in daily:
-            daily[day] = {"date": day, "volume_usdc": Decimal("0"), "trades": 0, "unique_users": set(), "unique_txs": set()}
+            daily[day] = {
+                "date": day, 
+                "volume_usdc": Decimal("0"), 
+                "trades": 0, 
+                "unique_users": set(), 
+                "unique_txs": set()
+            }
         daily[day]["volume_usdc"] += size_usdc
         daily[day]["trades"] += 1
         if owner:
@@ -156,8 +188,16 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
         if txh:
             daily[day]["unique_txs"].add(txh)
 
+        # Weekly aggregation
+        wk = iso_week_key(mt)
         if wk not in weekly:
-            weekly[wk] = {"week": wk, "volume_usdc": Decimal("0"), "trades": 0, "unique_users": set(), "unique_txs": set()}
+            weekly[wk] = {
+                "week": wk, 
+                "volume_usdc": Decimal("0"), 
+                "trades": 0, 
+                "unique_users": set(), 
+                "unique_txs": set()
+            }
         weekly[wk]["volume_usdc"] += size_usdc
         weekly[wk]["trades"] += 1
         if owner:
@@ -165,10 +205,12 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
         if txh:
             weekly[wk]["unique_txs"].add(txh)
 
+    # Window stats (last N hours)
     vol_win = Decimal("0")
     n_win = 0
     tx_win: Set[str] = set()
     users_win: Set[str] = set()
+    
     for t in trades:
         mt = parse_match_time(t.get("matchTime") or t.get("match_time"))
         if not mt or mt < start:
@@ -185,9 +227,11 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
     def money(x: Decimal) -> str:
         return str(x.quantize(Decimal("0.01")))
 
+    # Sort by date (newest first)
     daily_list = sorted(daily.values(), key=lambda x: x["date"], reverse=True)
     weekly_list = sorted(weekly.values(), key=lambda x: x["week"], reverse=True)
 
+    # Convert sets to counts
     for row in daily_list:
         row["unique_users"] = len(row["unique_users"])
         row["unique_txs"] = len(row["unique_txs"])
@@ -202,7 +246,13 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
         "window_hours": window_hours,
         "window_start_utc": start.isoformat(),
         "window_end_utc": now.isoformat(),
-        "total_trades_fetched": len(trades),
+        "debug_info": {
+            "total_trades_fetched": len(trades),
+            "trades_with_timestamp": trades_with_time,
+            "trades_without_timestamp": trades_without_time,
+            "daily_buckets": len(daily_list),
+            "weekly_buckets": len(weekly_list),
+        },
         "all_time": {
             "volume_usdc": money(vol_all),
             "trades": n_all,
@@ -228,9 +278,13 @@ class handler(BaseHTTPRequestHandler):
             query_params = parse_qs(parsed_path.query)
             hours = int(query_params.get('hours', ['24'])[0])
             
-            # Get data
+            # Опционально: можем запросить трейды только за определенный период
+            # Но API может не поддерживать фильтрацию по времени, поэтому получаем все
             client = init_client_builder_only()
+            
+            # Получаем все трейды (API может не поддерживать after/before для matchTime)
             trades = fetch_all_builder_trades(client)
+            
             data = compute_stats(trades, window_hours=hours)
             
             # Send response
