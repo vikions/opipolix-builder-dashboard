@@ -24,13 +24,13 @@ def parse_match_time(s: Optional[str]) -> Optional[datetime]:
     if not s:
         return None
     try:
-        # Попробуем разные форматы
+        
         if s.endswith('Z'):
             return datetime.fromisoformat(s.replace("Z", "+00:00"))
         return datetime.fromisoformat(s)
     except Exception:
         try:
-            # Попробуем timestamp
+            
             return datetime.fromtimestamp(float(s), tz=timezone.utc)
         except Exception:
             return None
@@ -146,7 +146,7 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
     daily: Dict[str, Dict[str, Any]] = {}
     weekly: Dict[str, Dict[str, Any]] = {}
 
-    # Для отладки
+    
     trades_with_time = 0
     trades_without_time = 0
 
@@ -163,7 +163,7 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
         if owner:
             users_all.add(owner)
 
-        # Парсим время
+        
         mt = parse_match_time(t.get("matchTime") or t.get("match_time"))
         if not mt:
             trades_without_time += 1
@@ -205,7 +205,7 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
         if txh:
             weekly[wk]["unique_txs"].add(txh)
 
-    # Window stats (last N hours)
+    
     vol_win = Decimal("0")
     n_win = 0
     tx_win: Set[str] = set()
@@ -227,11 +227,11 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
     def money(x: Decimal) -> str:
         return str(x.quantize(Decimal("0.01")))
 
-    # Sort by date (newest first)
+    
     daily_list = sorted(daily.values(), key=lambda x: x["date"], reverse=True)
     weekly_list = sorted(weekly.values(), key=lambda x: x["week"], reverse=True)
 
-    # Convert sets to counts
+    
     for row in daily_list:
         row["unique_users"] = len(row["unique_users"])
         row["unique_txs"] = len(row["unique_txs"])
@@ -273,21 +273,20 @@ def compute_stats(trades: List[Dict[str, Any]], window_hours: int) -> Dict[str, 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
-            # Parse query parameters
+            
             parsed_path = urlparse(self.path)
             query_params = parse_qs(parsed_path.query)
             hours = int(query_params.get('hours', ['24'])[0])
             
-            # Опционально: можем запросить трейды только за определенный период
-            # Но API может не поддерживать фильтрацию по времени, поэтому получаем все
+           
             client = init_client_builder_only()
             
-            # Получаем все трейды (API может не поддерживать after/before для matchTime)
+          
             trades = fetch_all_builder_trades(client)
             
             data = compute_stats(trades, window_hours=hours)
             
-            # Send response
+           
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
