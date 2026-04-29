@@ -26,6 +26,10 @@ Set the builder display name exactly as Polymarket returns it:
 POLY_BUILDER_NAME=OpiPoliX
 ```
 
+If you fork this dashboard for another builder, replace `OpiPoliX` with that
+builder's exact public Polymarket builder name. No private Polymarket keys are
+needed for the public Data API version.
+
 Optional override:
 
 ```env
