@@ -647,14 +647,14 @@
               <p class="signal-note">All-time USDC handled by the builder account.</p>
             </article>
             <article class="signal-card">
-              <span class="signal-chip">Trades Fetched</span>
+              <span class="signal-chip">Active Users</span>
               <div class="signal-value" id="signalTrades">--</div>
-              <p class="signal-note">Complete payload processed in the current dashboard sync.</p>
+              <p class="signal-note">All-time active users reported by Polymarket Data API.</p>
             </article>
             <article class="signal-card">
-              <span class="signal-chip">Timestamp Coverage</span>
+              <span class="signal-chip">Daily Rows</span>
               <div class="signal-value" id="signalCoverage">--</div>
-              <p class="signal-note">Share of trades that include usable timing metadata.</p>
+              <p class="signal-note">Daily builder buckets available for charts and tables.</p>
             </article>
             <article class="signal-card">
               <span class="signal-chip">Refresh Cadence</span>
@@ -683,7 +683,7 @@
                 <div>
                   <p class="eyebrow eyebrow-light">Archive</p>
                   <h3 class="panel-title">All-Time Performance</h3>
-                  <p class="panel-copy">Lifetime scale across volume, trades, transactions, and users.</p>
+                  <p class="panel-copy">Lifetime scale across volume, active users, rank, and available periods.</p>
                 </div>
               </div>
               <div class="stats" id="all"></div>
@@ -719,7 +719,7 @@
           <div class="section-head">
             <div>
               <p class="eyebrow eyebrow-light">Trend Analysis</p>
-              <h2 class="section-title">Volume & Trade Rhythm</h2>
+              <h2 class="section-title">Volume & User Rhythm</h2>
               <p class="section-copy">Recent daily movement across the latest 14 tracked sessions.</p>
             </div>
             <p class="section-note">Chart View</p>
@@ -743,14 +743,14 @@
               <div class="panel-head">
                 <div>
                   <p class="eyebrow">Cadence</p>
-                  <h3 class="panel-title">Trade Rhythm</h3>
-                  <p class="panel-copy">Number of trades completed per day over the same period.</p>
+                  <h3 class="panel-title">User Rhythm</h3>
+                  <p class="panel-copy">Active users reported per day over the same period.</p>
                 </div>
                 <span class="panel-note">Last 14 Days</span>
               </div>
               <div class="chart-frame">
-                <canvas id="tradesChart" aria-label="Daily trades trend"></canvas>
-                <div class="chart-state" id="tradesState" hidden>No daily trade data available yet.</div>
+                <canvas id="tradesChart" aria-label="Daily active users trend"></canvas>
+                <div class="chart-state" id="tradesState" hidden>No daily user data available yet.</div>
               </div>
             </article>
           </div>
@@ -808,10 +808,6 @@
       const numberFormatter = new Intl.NumberFormat("en-US");
       const compactFormatter = new Intl.NumberFormat("en-US", {
         notation: "compact",
-        maximumFractionDigits: 1,
-      });
-      const percentFormatter = new Intl.NumberFormat("en-US", {
-        style: "percent",
         maximumFractionDigits: 1,
       });
       const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
@@ -971,7 +967,7 @@
             labels,
             datasets: [
               {
-                label: "Trades",
+                label: "Active Users",
                 data: values,
                 backgroundColor: fill,
                 borderColor: "#6fbec4",
@@ -992,7 +988,7 @@
               },
               tooltip: {
                 callbacks: {
-                  label: (item) => `Trades: ${formatNumber(item.parsed.y)}`,
+                  label: (item) => `Users: ${formatNumber(item.parsed.y)}`,
                 },
               },
             },
@@ -1014,9 +1010,9 @@
       function renderStats(targetId, stats, label) {
         document.getElementById(targetId).innerHTML = [
           statCard("Volume", formatMoney(stats.volume_usdc), `${label} volume in USDC.`),
-          statCard("Trades", formatNumber(stats.trades), `${label} completed trade count.`),
-          statCard("Unique TXs", formatNumber(stats.unique_txs), `${label} unique transaction hashes.`),
-          statCard("Unique Users", formatNumber(stats.unique_users), `${label} participating wallet addresses.`),
+          statCard("Active Users", formatNumber(stats.active_users), `${label} active users reported by Polymarket.`),
+          statCard("Best Rank", stats.rank || "-", `${label} best builder rank in the available buckets.`),
+          statCard("Periods", formatNumber(stats.period_rows), `${label} data buckets returned by the API.`),
         ].join("");
       }
 
@@ -1031,12 +1027,12 @@
           { value: 0, date: "N/A" }
         );
 
-        const avgTradeAll = safeDivide(toNumber(data.all_time.volume_usdc), toNumber(data.all_time.trades));
-        const avgTradeWindow = safeDivide(toNumber(data.window.volume_usdc), toNumber(data.window.trades));
+        const avgUserAll = safeDivide(toNumber(data.all_time.volume_usdc), toNumber(data.all_time.active_users));
+        const avgUserWindow = safeDivide(toNumber(data.window.volume_usdc), toNumber(data.window.active_users));
 
         document.getElementById("insights").innerHTML = [
-          insightCard("Scale", "Average Ticket", formatMoney(avgTradeAll), `${formatNumber(data.all_time.trades)} trades in the lifetime record.`),
-          insightCard("Window", "24-Hour Ticket", formatMoney(avgTradeWindow), `${formatNumber(data.window.trades)} trades in the live window.`),
+          insightCard("Scale", "Volume/User", formatMoney(avgUserAll), `${formatNumber(data.all_time.active_users)} active users in the lifetime record.`),
+          insightCard("Window", "24-Hour Volume/User", formatMoney(avgUserWindow), `${formatNumber(data.window.active_users)} active users in the live window.`),
           insightCard("Peak Day", "Best Daily Volume", formatMoney(bestDay.value), bestDay.date === "N/A" ? "Daily history will appear when data is available." : `Highest daily print on ${bestDay.date}.`),
           insightCard("Coverage", "Tracked Periods", `${formatNumber(dailyRows.length)} / ${formatNumber(weeklyRows.length)}`, "Daily rows versus weekly rows currently available in the payload."),
         ].join("");
@@ -1055,17 +1051,16 @@
 
           const data = await response.json();
           const debugInfo = data.debug_info || {};
-          const coverage = safeDivide(toNumber(debugInfo.trades_with_timestamp), toNumber(debugInfo.total_trades_fetched));
 
           document.getElementById("meta").innerHTML = `
             <span class="pill pill-live">Live Sync</span>
             <span>Updated ${dateTimeFormatter.format(new Date(data.generated_at_utc))}</span>
-            <span>${formatNumber(debugInfo.total_trades_fetched)} trades fetched</span>
+            <span>${formatNumber(debugInfo.daily_buckets)} daily rows for ${data.builder_name}</span>
           `;
 
           document.getElementById("signalVolume").textContent = formatCompact(data.all_time.volume_usdc);
-          document.getElementById("signalTrades").textContent = formatCompact(debugInfo.total_trades_fetched);
-          document.getElementById("signalCoverage").textContent = percentFormatter.format(coverage);
+          document.getElementById("signalTrades").textContent = formatCompact(data.all_time.active_users);
+          document.getElementById("signalCoverage").textContent = formatCompact(debugInfo.daily_buckets);
           document.getElementById("windowLabel").textContent = `${data.window_hours}-hour live window with automatic updates.`;
 
           renderStats("all", data.all_time, "All-time");
@@ -1075,7 +1070,7 @@
           const dailyTrend = (data.daily || []).slice(0, 14).reverse();
           const labels = dailyTrend.map((row) => row.date);
           const volumes = dailyTrend.map((row) => toNumber(row.volume_usdc));
-          const trades = dailyTrend.map((row) => toNumber(row.trades));
+          const trades = dailyTrend.map((row) => toNumber(row.active_users));
 
           if (labels.length > 0) {
             setChartState("volumeChart", "volumeState", false);
@@ -1094,22 +1089,20 @@
             }
 
             setChartState("volumeChart", "volumeState", true, "No daily volume data available yet.");
-            setChartState("tradesChart", "tradesState", true, "No daily trade data available yet.");
+            setChartState("tradesChart", "tradesState", true, "No daily user data available yet.");
           }
 
           const dailyRows = (data.daily || []).map((row) => ({
             ...row,
             volume_usdc: formatMoney(row.volume_usdc),
-            trades: formatNumber(row.trades),
-            unique_users: formatNumber(row.unique_users),
-            unique_txs: formatNumber(row.unique_txs),
+            active_users: formatNumber(row.active_users),
+            rank: row.rank || "-",
           }));
           const weeklyRows = (data.weekly || []).map((row) => ({
             ...row,
             volume_usdc: formatMoney(row.volume_usdc),
-            trades: formatNumber(row.trades),
-            unique_users: formatNumber(row.unique_users),
-            unique_txs: formatNumber(row.unique_txs),
+            active_users: formatNumber(row.active_users),
+            rank: row.rank || "-",
           }));
 
           document.getElementById("dailyCount").textContent = `${formatNumber(dailyRows.length)} Rows`;
@@ -1120,9 +1113,8 @@
             [
               { key: "date", label: "Date (UTC)" },
               { key: "volume_usdc", label: "Volume", align: "right" },
-              { key: "trades", label: "Trades", align: "right" },
-              { key: "unique_users", label: "Users", align: "right" },
-              { key: "unique_txs", label: "TXs", align: "right" },
+              { key: "active_users", label: "Users", align: "right" },
+              { key: "rank", label: "Rank", align: "right" },
             ],
             "Daily statistics"
           );
@@ -1132,16 +1124,15 @@
             [
               { key: "week", label: "ISO Week" },
               { key: "volume_usdc", label: "Volume", align: "right" },
-              { key: "trades", label: "Trades", align: "right" },
-              { key: "unique_users", label: "Users", align: "right" },
-              { key: "unique_txs", label: "TXs", align: "right" },
+              { key: "active_users", label: "Users", align: "right" },
+              { key: "rank", label: "Rank", align: "right" },
             ],
             "Weekly statistics"
           );
         } catch (error) {
           console.error("Error loading stats:", error);
           document.getElementById("meta").innerHTML =
-            '<span class="pill pill-wait">Sync Error</span><span>Unable to load stats. Check the API route or builder credentials.</span>';
+            '<span class="pill pill-wait">Sync Error</span><span>Unable to load stats. Check the API route or builder name.</span>';
         }
       }
 

@@ -1,80 +1,46 @@
-# 📊 Polymarket Builder Dashboard
+# Polymarket Builder Dashboard
 
-Beautiful real-time analytics dashboard for Polymarket builders to track trading activity, volume, and user engagement.
+Public analytics dashboard for a Polymarket builder using the V2 Data API.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/vikions/opipolix-builder-dashboard)
+## What It Shows
 
-## ✨ Features
+- Daily and weekly builder volume
+- Daily and weekly active users
+- Builder rank per returned period
+- All-time bucket summary
+- Auto-refresh every 5 minutes
 
-- 📈 Real-time statistics (volume, trades, users, transactions)
-- 📊 Interactive charts with daily trends
-- ⏱️ All-time and 24-hour performance tracking
-- 📅 Daily & weekly breakdowns
-- 🔄 Auto-refresh every 5 minutes
+The dashboard uses the public endpoint:
 
-## 🚀 Quick Deploy
-
-1. **Click** the "Deploy with Vercel" button above
-2. **Fork** the repository to your GitHub
-3. **Add** these environment variables in Vercel:
-   - `BUILDER_API_KEY`
-   - `BUILDER_SECRET`
-   - `BUILDER_PASS_PHRASE`
-4. **Deploy** and your dashboard is live! 🎉
-
-### Get Your API Credentials
-
-Get your Polymarket Builder API credentials from the [Polymarket Builder Portal](https://polymarket.com).
-
-## 📁 Project Structure
-```
-├── api/stats.py          # Backend API
-├── public/index.html     # Frontend dashboard
-├── requirements.txt      # Dependencies
-└── vercel.json          # Config
+```text
+https://data-api.polymarket.com/v1/builders/volume
 ```
 
-## 🛠️ Local Development
+It does not require private CLOB credentials.
+
+## Environment
+
+Set the builder display name exactly as Polymarket returns it:
+
+```env
+POLY_BUILDER_NAME=OpiPoliX
+```
+
+Optional override:
+
+```env
+POLYMARKET_DATA_API_HOST=https://data-api.polymarket.com
+```
+
+## Local Development
+
 ```bash
-# Clone
-git clone https://github.com/vikions/opipolix-builder-dashboard.git
-cd opipolix-builder-dashboard
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Create .env file
-echo "BUILDER_API_KEY=your_key
-BUILDER_SECRET=your_secret
-BUILDER_PASS_PHRASE=your_passphrase" > .env
-
-# Run locally
 vercel dev
 ```
 
-Open `http://localhost:3000`
+Open `http://localhost:3000`.
 
-## 🐛 Troubleshooting
+## Notes
 
-**No data showing?**
-- Check environment variables in Vercel: Settings → Environment Variables
-- Verify API credentials are correct
-- Make sure you have trades in your builder account
-
-**500 Error?**
-- Check logs: Deployments → Latest → View Function Logs
-- Test API: `https://your-project.vercel.app/api/stats?hours=24`
-
-## 🤝 Contributing
-
-PRs welcome! Fork, create a feature branch, and submit a PR.
-
-## 📝 License
-
-MIT License - see [LICENSE](LICENSE)
-
----
-
-⭐ **Star this repo if it helps you!**
-
-Made with ❤️ for Polymarket Builders by [vikions](https://github.com/vikions)
+The public Data API provides volume, active users, and rank buckets. It does not expose the old trade-level fields such as transaction hashes or exact trade counts. For those, the dashboard would need a separate authenticated V2 `/builder/trades` integration with `py-clob-client-v2`, L2 CLOB credentials, and `POLY_BUILDER_CODE`.
